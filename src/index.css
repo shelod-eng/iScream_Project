@@ -1,0 +1,23 @@
+﻿@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --iscream-primary: #1C66B8;
+  --iscream-dark: #0E3F91;
+  --iscream-purple: #4C4ACF;
+  --iscream-teal: #0F8F7D;
+  --iscream-green: #1C8F3A;
+  --iscream-bg: #F4F6FA;
+  --iscream-text: #0F172A;
+}
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--iscream-bg);
+  color: var(--iscream-text);
+}
+
+* { box-sizing: border-box; }
