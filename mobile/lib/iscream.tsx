@@ -35,6 +35,7 @@ export type Incident = {
   events: IncidentEvent[];
   latitude?: number;
   longitude?: number;
+  addressText?: string;
 };
 
 type Profile = {
@@ -57,6 +58,7 @@ export type Report = {
   summary: string;
   details?: string;
   locationText: string;
+  photoUri?: string;
   createdAt: number;
 };
 
@@ -68,7 +70,7 @@ type IscreamContextValue = {
 
   activeIncident: Incident | null;
   incidents: Incident[];
-  startIncident: (opts?: { latitude?: number; longitude?: number }) => Promise<void>;
+  startIncident: (opts?: { latitude?: number; longitude?: number; addressText?: string }) => Promise<void>;
   cancelActive: () => void;
   resolveActive: () => void;
 
@@ -77,7 +79,7 @@ type IscreamContextValue = {
   removeContact: (id: string) => void;
 
   reports: Report[];
-  submitGBVReport: (input: { summary: string; details?: string; locationText?: string }) => Promise<void>;
+  submitGBVReport: (input: { summary: string; details?: string; locationText?: string; photoUri?: string }) => Promise<void>;
 
   backend: {
     enabled: boolean;
@@ -107,7 +109,6 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
-  // Demo persona requested: Jackie, Orlando West
   const profile = useMemo<Profile>(
     () => ({ fullName: 'Jackie', email: 'jackie@iscream.app', locationText: 'Orlando West, Soweto' }),
     []
@@ -174,7 +175,7 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
     return incidents.find((i) => i.id === activeId) ?? null;
   }, [activeId, incidents]);
 
-  const startIncident = async (opts?: { latitude?: number; longitude?: number }) => {
+  const startIncident = async (opts?: { latitude?: number; longitude?: number; addressText?: string }) => {
     const now = Date.now();
     const incident: Incident = {
       id: id(),
@@ -186,12 +187,12 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
       events: makeTimeline(now),
       latitude: opts?.latitude,
       longitude: opts?.longitude,
+      addressText: opts?.addressText,
     };
 
     setIncidents((prev) => [incident, ...prev]);
     setActiveId(incident.id);
 
-    // Optional backend sync
     const userId = await ensureBackendUser();
     if (backendEnabled && userId) {
       try {
@@ -201,7 +202,7 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
             userId,
             type: selectedType,
             title: 'SOS Triggered (mobile)',
-            description: 'Demo SOS from iScream mobile',
+            description: incident.addressText ? `Address: ${incident.addressText}` : 'Demo SOS from iScream mobile',
             latitude: opts?.latitude,
             longitude: opts?.longitude,
           }),
@@ -271,7 +272,7 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
     setContacts((prev) => prev.filter((c) => c.id !== contactId));
   };
 
-  const submitGBVReport = async (input: { summary: string; details?: string; locationText?: string }) => {
+  const submitGBVReport = async (input: { summary: string; details?: string; locationText?: string; photoUri?: string }) => {
     const now = Date.now();
     const locationText = input.locationText?.trim() || profile.locationText;
 
@@ -281,12 +282,12 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
       summary: input.summary.trim() || 'GBV report',
       details: input.details?.trim() || undefined,
       locationText,
+      photoUri: input.photoUri,
       createdAt: now,
     };
 
     setReports((prev) => [r, ...prev]);
 
-    // Optional backend sync: store as NOTE event on a new incident
     const userId = await ensureBackendUser();
     if (backendEnabled && userId) {
       try {

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { useIscream } from '@/lib/iscream';
@@ -19,9 +19,14 @@ function fmtDuration(ms: number) {
   return `${mm}:${ss}`;
 }
 
+function mapsLink(latitude?: number, longitude?: number) {
+  if (latitude == null || longitude == null) return null;
+  return `https://maps.google.com/?q=${latitude},${longitude}`;
+}
+
 export default function StatusScreen() {
   const router = useRouter();
-  const { activeIncident, cancelActive, resolveActive, backend } = useIscream();
+  const { activeIncident, cancelActive, resolveActive, backend, profile, contacts } = useIscream();
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -33,6 +38,21 @@ export default function StatusScreen() {
     if (!activeIncident) return '00:00';
     return fmtDuration(now - activeIncident.startedAt);
   }, [activeIncident, now]);
+
+  const shareAlert = async () => {
+    if (!activeIncident) return;
+    const link = mapsLink(activeIncident.latitude, activeIncident.longitude);
+    const guardians = contacts.map((c) => c.name).slice(0, 5).join(', ');
+    const lines = [
+      `iScream SOS: ${profile.fullName} needs help (${activeIncident.type}).`,
+      `Address: ${activeIncident.addressText ?? profile.locationText}.`,
+      link ? `Map: ${link}` : null,
+      guardians ? `Guardians: ${guardians}` : null,
+      `Time: ${new Date(activeIncident.startedAt).toLocaleString()}`,
+    ].filter(Boolean);
+
+    await Share.share({ message: lines.join('\n') });
+  };
 
   if (!activeIncident) {
     return (
@@ -66,16 +86,37 @@ export default function StatusScreen() {
         </View>
       </View>
 
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>LOCATION</Text>
+        <Text style={styles.meta}>{activeIncident.addressText ?? profile.locationText}</Text>
+        {(activeIncident.latitude != null && activeIncident.longitude != null) && (
+          <Text style={styles.meta}>Coords: {activeIncident.latitude.toFixed(5)}, {activeIncident.longitude.toFixed(5)}</Text>
+        )}
+
+        <View style={styles.actionRow}>
+          <Pressable onPress={() => Linking.openURL('tel:10111')} style={styles.actionBtn}>
+            <Text style={styles.actionText}>Call 10111</Text>
+          </Pressable>
+          <Pressable onPress={() => Linking.openURL('tel:10177')} style={styles.actionBtn}>
+            <Text style={styles.actionText}>Call 10177</Text>
+          </Pressable>
+        </View>
+        <View style={styles.actionRow}>
+          <Pressable onPress={shareAlert} style={styles.actionBtn}>
+            <Text style={styles.actionText}>Share SOS</Text>
+          </Pressable>
+          <Pressable onPress={() => router.push('/incidents' as any)} style={styles.actionBtn}>
+            <Text style={styles.actionText}>History</Text>
+          </Pressable>
+        </View>
+      </View>
+
       {backend.lastError && (
         <View style={styles.warn}>
           <Text style={styles.warnTitle}>Backend sync warning</Text>
           <Text style={styles.warnText}>{backend.lastError}</Text>
         </View>
       )}
-
-      <Pressable onPress={() => router.push('/incidents' as any)} style={styles.link}>
-        <Text style={styles.linkText}>View Incident History</Text>
-      </Pressable>
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>RESPONSE TIMELINE</Text>
@@ -136,6 +177,11 @@ const styles = StyleSheet.create({
 
   card: { marginTop: 16, backgroundColor: 'white', borderRadius: 16, borderWidth: 1, borderColor: BRAND.border, padding: 16 },
   cardTitle: { color: '#6B7C92', fontWeight: '900', letterSpacing: 1 },
+  meta: { marginTop: 8, color: '#22344B' },
+
+  actionRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  actionBtn: { flex: 1, backgroundColor: BRAND.navy, paddingVertical: 12, borderRadius: 14, alignItems: 'center' },
+  actionText: { color: 'white', fontWeight: '900' },
 
   eventRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
   dot: { width: 14, height: 14, borderRadius: 7, marginTop: 3 },
