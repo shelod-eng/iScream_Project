@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
+
 import { useIscream } from '@/lib/iscream';
 
 const BRAND = {
@@ -18,7 +20,8 @@ function fmtDuration(ms: number) {
 }
 
 export default function StatusScreen() {
-  const { activeIncident, cancelActive, resolveActive } = useIscream();
+  const router = useRouter();
+  const { activeIncident, cancelActive, resolveActive, backend } = useIscream();
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -39,6 +42,9 @@ export default function StatusScreen() {
           <Text style={styles.emptyTitle}>No active emergency</Text>
           <Text style={styles.emptySub}>Go to Home and hold SOS to start a demo incident.</Text>
         </View>
+        <Pressable onPress={() => router.push('/incidents' as any)} style={styles.link}>
+          <Text style={styles.linkText}>View Incident History</Text>
+        </Pressable>
       </View>
     );
   }
@@ -46,7 +52,7 @@ export default function StatusScreen() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={{ paddingBottom: 30 }}>
       <View style={styles.header}>
-        <Text style={styles.headerTop}>● EMERGENCY ACTIVE</Text>
+        <Text style={styles.headerTop}>EMERGENCY ACTIVE</Text>
         <Text style={styles.headerType}>{activeIncident.type}</Text>
         <View style={styles.headerRow}>
           <View style={styles.metric}>
@@ -59,6 +65,17 @@ export default function StatusScreen() {
           </View>
         </View>
       </View>
+
+      {backend.lastError && (
+        <View style={styles.warn}>
+          <Text style={styles.warnTitle}>Backend sync warning</Text>
+          <Text style={styles.warnText}>{backend.lastError}</Text>
+        </View>
+      )}
+
+      <Pressable onPress={() => router.push('/incidents' as any)} style={styles.link}>
+        <Text style={styles.linkText}>View Incident History</Text>
+      </Pressable>
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>RESPONSE TIMELINE</Text>
@@ -109,6 +126,13 @@ const styles = StyleSheet.create({
   metric: { flex: 1, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 14, padding: 12 },
   metricLabel: { color: 'rgba(255,255,255,0.9)', fontWeight: '700', fontSize: 12 },
   metricValue: { marginTop: 6, color: 'white', fontWeight: '900', fontSize: 20 },
+
+  warn: { marginTop: 14, backgroundColor: '#FFF3E0', borderRadius: 14, padding: 12, borderWidth: 1, borderColor: '#FFE0B2' },
+  warnTitle: { fontWeight: '900', color: '#E67E22' },
+  warnText: { marginTop: 6, color: '#6B7C92' },
+
+  link: { marginTop: 16, backgroundColor: BRAND.navy, paddingVertical: 12, borderRadius: 14, alignItems: 'center' },
+  linkText: { color: 'white', fontWeight: '900' },
 
   card: { marginTop: 16, backgroundColor: 'white', borderRadius: 16, borderWidth: 1, borderColor: BRAND.border, padding: 16 },
   cardTitle: { color: '#6B7C92', fontWeight: '900', letterSpacing: 1 },

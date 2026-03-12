@@ -1,6 +1,9 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
+
 import { useIscream, type IncidentType } from '@/lib/iscream';
 
 const BRAND = {
@@ -20,7 +23,22 @@ const TYPES: { key: IncidentType; label: string }[] = [
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { profile, selectedType, setSelectedType, startIncident, activeIncident } = useIscream();
+  const { profile, selectedType, setSelectedType, startIncident, activeIncident, backend } = useIscream();
+
+  const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const perm = await Location.requestForegroundPermissionsAsync();
+        if (perm.status !== 'granted') return;
+        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        setCoords({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+      } catch {
+        // ignore
+      }
+    })();
+  }, []);
 
   const [holding, setHolding] = useState(false);
   const [holdMs, setHoldMs] = useState(0);
@@ -45,10 +63,21 @@ export default function HomeScreen() {
       const startedAt = startAtRef.current ?? Date.now();
       const ms = Date.now() - startedAt;
       setHoldMs(ms);
+
       if (ms >= 3000) {
         stop();
-        startIncident();
-        router.push('/status');
+        (async () => {
+          try {
+            await startIncident({ latitude: coords?.latitude, longitude: coords?.longitude });
+            await Notifications.scheduleNotificationAsync({
+              content: { title: 'iScream SOS Triggered', body: 'Emergency started. View status timeline.' },
+              trigger: null,
+            });
+          } catch {
+            // ignore
+          }
+          router.push('/(tabs)/status');
+        })();
       }
     }, 50);
   };
@@ -56,12 +85,26 @@ export default function HomeScreen() {
   return (
     <View style={styles.screen}>
       <Text style={styles.title}>iScream</Text>
-      <Text style={styles.subtitle}>Interactive Mobile Prototype</Text>
+      <Text style={styles.subtitle}>Mobile MVP (Expo)</Text>
+
+      <View style={styles.pills}>
+        <View style={[styles.pill, { backgroundColor: backend.enabled ? '#E8F5E9' : '#FFF3E0' }]}>
+          <Text style={[styles.pillText, { color: backend.enabled ? '#1B8A3A' : '#E67E22' }]}>
+            {backend.enabled ? 'Backend Sync ON' : 'Backend Sync OFF'}
+          </Text>
+        </View>
+        <View style={[styles.pill, { backgroundColor: coords ? '#E3F2FD' : '#ECEFF1' }]}>
+          <Text style={[styles.pillText, { color: coords ? BRAND.blue : '#607D8B' }]}>
+            {coords ? 'Location Ready' : 'No Location'}
+          </Text>
+        </View>
+      </View>
 
       <View style={styles.card}>
         <Text style={styles.cardLabel}>Logged in as</Text>
         <Text style={styles.cardName}>{profile.fullName}</Text>
         <Text style={styles.cardMeta}>{profile.locationText}</Text>
+        {coords && <Text style={styles.cardMeta}>Coords: {coords.latitude.toFixed(5)}, {coords.longitude.toFixed(5)}</Text>}
       </View>
 
       <Text style={styles.section}>Select emergency type</Text>
@@ -83,7 +126,9 @@ export default function HomeScreen() {
           style={[styles.sos, activeIncident && styles.sosDisabled]}
           disabled={!!activeIncident}>
           <Text style={styles.sosText}>SOS</Text>
-          <Text style={styles.sosHint}>{activeIncident ? 'Emergency Active' : holding ? `Hold… ${(progress * 3).toFixed(1)}s` : 'Hold 3s'}</Text>
+          <Text style={styles.sosHint}>
+            {activeIncident ? 'Emergency Active' : holding ? `Holdâ€¦ ${(progress * 3).toFixed(1)}s` : 'Hold 3s'}
+          </Text>
         </Pressable>
         {holding && (
           <View style={styles.progressOuter}>
@@ -92,15 +137,12 @@ export default function HomeScreen() {
         )}
       </View>
 
-      {!!activeIncident && (
-        <View style={[styles.activeCard, { backgroundColor: BRAND.red }]}>
-          <Text style={styles.activeTitle}>EMERGENCY ACTIVE</Text>
-          <Text style={styles.activeSub}>{activeIncident.type}</Text>
-        </View>
-      )}
+      <Pressable onPress={() => router.push('/incidents' as any)} style={styles.historyBtn}>
+        <Text style={styles.historyText}>View Incident History</Text>
+      </Pressable>
 
       <View style={styles.footer}>
-        <Text style={styles.footerText}>MVP focus: SOS, status timeline, contacts, backend sync.</Text>
+        <Text style={styles.footerText}>MVP includes SOS + timeline + contacts + GBV reports.</Text>
       </View>
     </View>
   );
@@ -110,6 +152,10 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: BRAND.bg, padding: 20 },
   title: { fontSize: 28, fontWeight: '800', color: BRAND.navy },
   subtitle: { marginTop: 4, color: '#4B5C77' },
+
+  pills: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  pill: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999 },
+  pillText: { fontWeight: '800', fontSize: 12 },
 
   card: {
     marginTop: 16,
@@ -164,9 +210,8 @@ const styles = StyleSheet.create({
   },
   progressInner: { height: 8, backgroundColor: BRAND.blue },
 
-  activeCard: { marginTop: 18, borderRadius: 14, padding: 14 },
-  activeTitle: { color: 'white', fontWeight: '900' },
-  activeSub: { color: 'white', marginTop: 4, fontWeight: '700' },
+  historyBtn: { marginTop: 14, backgroundColor: BRAND.navy, paddingVertical: 12, borderRadius: 14, alignItems: 'center' },
+  historyText: { color: 'white', fontWeight: '900' },
 
   footer: { marginTop: 'auto', paddingTop: 12 },
   footerText: { color: '#6B7C92', fontSize: 12 },
