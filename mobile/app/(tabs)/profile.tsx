@@ -1,6 +1,7 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
+import { useRouter } from 'expo-router';
 
 import { useIscream } from '@/lib/iscream';
 
@@ -16,12 +17,35 @@ const BRAND = {
 const DASHBOARD_URL = process.env.EXPO_PUBLIC_DASHBOARD_URL?.trim();
 
 export default function ProfileScreen() {
+  const router = useRouter();
   const { profile, backend } = useIscream();
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={{ paddingBottom: 30 }}>
-      <Text style={styles.title}>Profile</Text>
-      <Text style={styles.sub}>Demo persona: {profile.fullName}</Text>
+      <Text style={styles.title}>More</Text>
+      <Text style={styles.sub}>Phase 1 features for funding demo</Text>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Quick Access</Text>
+        <View style={styles.grid}>
+          <Pressable onPress={() => router.push('/medical' as any)} style={styles.tile}>
+            <Text style={styles.tileTitle}>Medical Profile</Text>
+            <Text style={styles.tileSub}>Unlock demo PIN: 1234</Text>
+          </Pressable>
+          <Pressable onPress={() => router.push('/assistant' as any)} style={styles.tile}>
+            <Text style={styles.tileTitle}>iScream Bot</Text>
+            <Text style={styles.tileSub}>Setup + safety tips</Text>
+          </Pressable>
+          <Pressable onPress={() => router.push('/places' as any)} style={styles.tile}>
+            <Text style={styles.tileTitle}>Safe Places</Text>
+            <Text style={styles.tileSub}>SAPS / hospitals / clinics</Text>
+          </Pressable>
+          <Pressable onPress={() => router.push('/incidents' as any)} style={styles.tile}>
+            <Text style={styles.tileTitle}>Incident History</Text>
+            <Text style={styles.tileSub}>All SOS events</Text>
+          </Pressable>
+        </View>
+      </View>
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>User</Text>
@@ -41,12 +65,10 @@ export default function ProfileScreen() {
           <Text style={styles.meta}>UserId: {backend.userId ?? 'not created yet'}</Text>
         </View>
         {backend.lastError && (
-          <Text style={[styles.meta, { color: BRAND.red, marginTop: 8 }]}>
-            Last error: {backend.lastError}
-          </Text>
+          <Text style={[styles.meta, { color: BRAND.red, marginTop: 8 }]}>Last error: {backend.lastError}</Text>
         )}
         <Text style={[styles.meta, { marginTop: 10 }]}>
-          To enable: set `EXPO_PUBLIC_API_URL` (laptop IP) and rebuild APK.
+          To enable: set `EXPO_PUBLIC_API_URL` to your laptop IP (same Wi‑Fi) and rebuild APK.
         </Text>
       </View>
 
@@ -68,9 +90,7 @@ export default function ProfileScreen() {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Voice Activation (Locked Phone)</Text>
         <Text style={styles.meta}>
-          This is not supported in Expo Go / standard APK MVP yet. It requires native background audio + OS-level
-          permissions (especially strict on iOS). We can prototype it in Phase 2 using a custom dev client and native
-          modules.
+          Phase 2 R&D: background audio monitoring + on-device model + OS permissions. Not shipped in this APK MVP.
         </Text>
       </View>
     </ScrollView>
@@ -85,6 +105,11 @@ const styles = StyleSheet.create({
   card: { marginTop: 14, backgroundColor: 'white', borderRadius: 16, borderWidth: 1, borderColor: BRAND.border, padding: 16 },
   cardTitle: { fontWeight: '900', color: '#22344B' },
   meta: { marginTop: 8, color: '#6B7C92' },
+
+  grid: { marginTop: 12, flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  tile: { width: '48%', backgroundColor: '#F4F7FB', borderWidth: 1, borderColor: BRAND.border, borderRadius: 14, padding: 12 },
+  tileTitle: { fontWeight: '900', color: BRAND.navy },
+  tileSub: { marginTop: 6, color: '#6B7C92', fontSize: 12 },
 
   row: { flexDirection: 'row', gap: 10, alignItems: 'center', marginTop: 10 },
   pill: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999 },

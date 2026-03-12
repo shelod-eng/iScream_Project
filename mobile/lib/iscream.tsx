@@ -62,6 +62,46 @@ export type Report = {
   createdAt: number;
 };
 
+export type BloodType = 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-';
+export type MedicalProfile = {
+  fullName: string;
+  nickname?: string;
+  dob?: string;
+  idNumber?: string;
+  address?: string;
+  heightCm?: number;
+  weightKg?: number;
+  bloodType?: BloodType;
+  allergies: string[];
+  conditions: string[];
+  medications: { name: string; dosage?: string; frequency?: string }[];
+  medicalAid?: { scheme?: string; membershipNumber?: string };
+  organDonor?: boolean;
+  emergencyContact?: { name?: string; relationship?: string; phone?: string };
+  specialNeeds?: string;
+};
+
+export type EvidenceUploadStatus = 'pending' | 'recording' | 'uploading' | 'complete' | 'failed';
+export type EvidenceRecording = {
+  id: string;
+  alertId: string;
+  userId: string;
+  startedAt: number;
+  durationSeconds: number;
+  status: EvidenceUploadStatus;
+  secondsRecorded: number;
+  chunksUploaded: number;
+  totalChunks: number;
+};
+
+export type ChatRole = 'user' | 'bot';
+export type ChatMessage = {
+  id: string;
+  role: ChatRole;
+  text: string;
+  at: number;
+};
+
 type IscreamContextValue = {
   profile: Profile;
 
@@ -80,6 +120,24 @@ type IscreamContextValue = {
 
   reports: Report[];
   submitGBVReport: (input: { summary: string; details?: string; locationText?: string; photoUri?: string }) => Promise<void>;
+
+  medical: {
+    profile: MedicalProfile;
+    isUnlocked: boolean;
+    unlock: (pin: string) => boolean;
+    lock: () => void;
+    update: (patch: Partial<MedicalProfile>) => void;
+  };
+
+  evidence: {
+    active: EvidenceRecording | null;
+    all: EvidenceRecording[];
+  };
+
+  assistant: {
+    messages: ChatMessage[];
+    send: (text: string) => void;
+  };
 
   backend: {
     enabled: boolean;
@@ -104,6 +162,26 @@ function makeTimeline(now: number): IncidentEvent[] {
   ];
 }
 
+function botReply(userText: string) {
+  const t = userText.toLowerCase();
+  if (t.includes('guardian') || t.includes('contact')) {
+    return "To add a Guardian: open Contacts → Add contact. Guardians get your SOS + location link.";
+  }
+  if (t.includes('sos') || t.includes('help')) {
+    return "To trigger SOS: hold the red SOS button for 3 seconds. The app sends GPS, starts evidence timer, and opens the share sheet to notify guardians.";
+  }
+  if (t.includes('voice') || t.includes('calibration') || t.includes('phrase')) {
+    return "Voice calibration (Phase 2): you’ll record 3 samples + custom phrases. For now, MVP uses hold-to-SOS.";
+  }
+  if (t.includes('gbv')) {
+    return "For GBV: use Report → GBV Quick Report. You can attach photo evidence. For emergencies, use SOS and call 10111/10177.";
+  }
+  if (t.includes('safe') || t.includes('places') || t.includes('police') || t.includes('hospital')) {
+    return "Safe Places Finder: open Places to find nearest SAPS, hospitals, and clinics. Tap Call or Navigate.";
+  }
+  return "I can help with setup, SOS, contacts, safe places, and GBV reporting. What do you want to do next?";
+}
+
 export function IscreamProvider({ children }: { children: React.ReactNode }) {
   const [selectedType, setSelectedType] = useState<IncidentType>('POLICE');
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -121,6 +199,32 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
 
   const [reports, setReports] = useState<Report[]>([]);
 
+  const [medicalProfile, setMedicalProfile] = useState<MedicalProfile>({
+    fullName: 'Jackie',
+    nickname: 'Jackie',
+    address: 'Orlando West, Soweto',
+    bloodType: 'O+',
+    allergies: ['Penicillin'],
+    conditions: ['Asthma'],
+    medications: [{ name: 'Ventolin', dosage: '2 puffs', frequency: 'as needed' }],
+    medicalAid: { scheme: 'Discovery', membershipNumber: 'DEMO-123456' },
+    organDonor: false,
+    emergencyContact: { name: 'Aunt Thando', relationship: 'Family', phone: '+27 71 555 0101' },
+  });
+  const [medicalUnlocked, setMedicalUnlocked] = useState(false);
+
+  const [evidenceAll, setEvidenceAll] = useState<EvidenceRecording[]>([]);
+  const [activeEvidenceId, setActiveEvidenceId] = useState<string | null>(null);
+
+  const [assistantMessages, setAssistantMessages] = useState<ChatMessage[]>([
+    {
+      id: id(),
+      role: 'bot',
+      text: "Hi Jackie — I’m iScream Bot. I can help you set up SOS, medical profile, safe places, and GBV reporting.",
+      at: Date.now(),
+    },
+  ]);
+
   const [backendUserId, setBackendUserId] = useState<string | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
 
@@ -129,9 +233,10 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (tickRef.current) clearInterval(tickRef.current);
     tickRef.current = setInterval(() => {
-      setIncidents((prev) => {
-        const now = Date.now();
-        return prev.map((inc) => {
+      const now = Date.now();
+
+      setIncidents((prev) =>
+        prev.map((inc) => {
           if (inc.status !== 'ACTIVE') return inc;
           const events = inc.events.map((e) => ({ ...e, done: e.done || now >= e.at }));
           const arrived = events.find((e) => e.kind === 'RESPONDER_ARRIVED')?.done;
@@ -140,8 +245,32 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
             responderEtaText: arrived ? 'On Scene' : inc.responderEtaText,
             events,
           };
-        });
-      });
+        })
+      );
+
+      setEvidenceAll((prev) =>
+        prev.map((ev) => {
+          if (ev.status === 'complete' || ev.status === 'failed') return ev;
+          const elapsed = Math.floor((now - ev.startedAt) / 1000);
+          const secondsRecorded = Math.min(ev.durationSeconds, Math.max(0, elapsed));
+
+          const totalChunks = ev.totalChunks;
+          const chunkLen = Math.max(1, Math.floor(ev.durationSeconds / totalChunks));
+          const chunksUploaded = Math.min(totalChunks, Math.floor(secondsRecorded / chunkLen));
+
+          let status: EvidenceUploadStatus = ev.status;
+          if (secondsRecorded > 0 && status === 'pending') status = 'recording';
+          if (chunksUploaded > 0 && status === 'recording') status = 'uploading';
+          if (secondsRecorded >= ev.durationSeconds && chunksUploaded >= totalChunks) status = 'complete';
+
+          return {
+            ...ev,
+            secondsRecorded,
+            chunksUploaded,
+            status,
+          };
+        })
+      );
     }, 1000);
 
     return () => {
@@ -175,6 +304,11 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
     return incidents.find((i) => i.id === activeId) ?? null;
   }, [activeId, incidents]);
 
+  const activeEvidence = useMemo(() => {
+    if (!activeEvidenceId) return null;
+    return evidenceAll.find((e) => e.id === activeEvidenceId) ?? null;
+  }, [activeEvidenceId, evidenceAll]);
+
   const startIncident = async (opts?: { latitude?: number; longitude?: number; addressText?: string }) => {
     const now = Date.now();
     const incident: Incident = {
@@ -192,6 +326,21 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
 
     setIncidents((prev) => [incident, ...prev]);
     setActiveId(incident.id);
+
+    // F-03 Evidence recording (demo): auto-start timer
+    const ev: EvidenceRecording = {
+      id: id(),
+      alertId: incident.id,
+      userId: profile.email,
+      startedAt: now,
+      durationSeconds: 4 * 60,
+      status: 'pending',
+      secondsRecorded: 0,
+      chunksUploaded: 0,
+      totalChunks: 8,
+    };
+    setEvidenceAll((prev) => [ev, ...prev]);
+    setActiveEvidenceId(ev.id);
 
     const userId = await ensureBackendUser();
     if (backendEnabled && userId) {
@@ -230,6 +379,7 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
       )
     );
     setActiveId(null);
+    setActiveEvidenceId(null);
   };
 
   const resolveActive = () => {
@@ -248,6 +398,7 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
       )
     );
     setActiveId(null);
+    setActiveEvidenceId(null);
   };
 
   const addContact = async (c: Omit<Contact, 'id'>) => {
@@ -314,6 +465,29 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const unlockMedical = (pin: string) => {
+    // Demo-only PIN
+    if (pin.trim() !== '1234') return false;
+    setMedicalUnlocked(true);
+    return true;
+  };
+
+  const lockMedical = () => setMedicalUnlocked(false);
+
+  const updateMedical = (patch: Partial<MedicalProfile>) => {
+    setMedicalProfile((prev) => ({ ...prev, ...patch }));
+  };
+
+  const assistantSend = (text: string) => {
+    const now = Date.now();
+    const userMsg: ChatMessage = { id: id(), role: 'user', text, at: now };
+    setAssistantMessages((prev) => [userMsg, ...prev]);
+
+    const reply = botReply(text);
+    const botMsg: ChatMessage = { id: id(), role: 'bot', text: reply, at: now + 250 };
+    setAssistantMessages((prev) => [botMsg, userMsg, ...prev]);
+  };
+
   const value: IscreamContextValue = {
     profile,
     selectedType,
@@ -328,6 +502,21 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
     removeContact,
     reports,
     submitGBVReport,
+    medical: {
+      profile: medicalProfile,
+      isUnlocked: medicalUnlocked,
+      unlock: unlockMedical,
+      lock: lockMedical,
+      update: updateMedical,
+    },
+    evidence: {
+      active: activeEvidence,
+      all: evidenceAll,
+    },
+    assistant: {
+      messages: assistantMessages,
+      send: assistantSend,
+    },
     backend: {
       enabled: backendEnabled,
       userId: backendUserId,

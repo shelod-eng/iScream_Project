@@ -24,9 +24,26 @@ function mapsLink(latitude?: number, longitude?: number) {
   return `https://maps.google.com/?q=${latitude},${longitude}`;
 }
 
+function statusLabel(s: string) {
+  switch (s) {
+    case 'pending':
+      return 'Starting…';
+    case 'recording':
+      return 'Recording (silent)';
+    case 'uploading':
+      return 'Uploading encrypted chunks';
+    case 'complete':
+      return 'Uploaded to evidence vault';
+    case 'failed':
+      return 'Upload failed';
+    default:
+      return s;
+  }
+}
+
 export default function StatusScreen() {
   const router = useRouter();
-  const { activeIncident, cancelActive, resolveActive, backend, profile, contacts } = useIscream();
+  const { activeIncident, cancelActive, resolveActive, backend, profile, contacts, evidence } = useIscream();
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -53,6 +70,8 @@ export default function StatusScreen() {
 
     await Share.share({ message: lines.join('\n') });
   };
+
+  const ev = evidence.active && activeIncident && evidence.active.alertId === activeIncident.id ? evidence.active : null;
 
   if (!activeIncident) {
     return (
@@ -109,6 +128,23 @@ export default function StatusScreen() {
             <Text style={styles.actionText}>History</Text>
           </Pressable>
         </View>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>EVIDENCE RECORDING (F-03)</Text>
+        {ev ? (
+          <>
+            <Text style={styles.meta}>Status: {statusLabel(ev.status)}</Text>
+            <Text style={styles.meta}>Recorded: {fmtDuration(ev.secondsRecorded * 1000)} / {fmtDuration(ev.durationSeconds * 1000)}</Text>
+            <Text style={styles.meta}>Upload: {ev.chunksUploaded}/{ev.totalChunks} chunks</Text>
+            <View style={styles.progressOuter}>
+              <View style={[styles.progressInner, { width: `${Math.min(1, ev.secondsRecorded / ev.durationSeconds) * 100}%` }]} />
+            </View>
+            <Text style={[styles.meta, { marginTop: 10 }]}>Evidence package: {ev.status === 'complete' ? 'Available in vault (demo)' : 'Processing…'}</Text>
+          </>
+        ) : (
+          <Text style={styles.meta}>Not started.</Text>
+        )}
       </View>
 
       {backend.lastError && (
@@ -182,6 +218,9 @@ const styles = StyleSheet.create({
   actionRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
   actionBtn: { flex: 1, backgroundColor: BRAND.navy, paddingVertical: 12, borderRadius: 14, alignItems: 'center' },
   actionText: { color: 'white', fontWeight: '900' },
+
+  progressOuter: { marginTop: 10, width: '100%', height: 8, backgroundColor: '#E1E8F5', borderRadius: 8, overflow: 'hidden' },
+  progressInner: { height: 8, backgroundColor: BRAND.green },
 
   eventRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
   dot: { width: 14, height: 14, borderRadius: 7, marginTop: 3 },

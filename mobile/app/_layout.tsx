@@ -63,6 +63,9 @@ function RootLayoutNav() {
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="incidents" options={{ title: 'Incident History' }} />
+          <Stack.Screen name="medical" options={{ title: 'Medical Profile' }} />
+          <Stack.Screen name="assistant" options={{ title: 'iScream Bot' }} />
+          <Stack.Screen name="places" options={{ title: 'Safe Places' }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
         </Stack>
       </IscreamProvider>
