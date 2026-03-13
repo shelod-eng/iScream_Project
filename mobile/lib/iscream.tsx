@@ -1,6 +1,15 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  serverTimestamp,
+  setDoc,
+} from 'firebase/firestore';
 
-import { apiEnabled, apiFetch } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
+import { db, firebaseEnabled } from '@/lib/firebase';
 
 export type IncidentType = 'POLICE' | 'MEDICAL' | 'FIRE' | 'CRIME' | 'OTHER';
 export type IncidentStatus = 'ACTIVE' | 'RESOLVED' | 'CANCELLED';
@@ -116,7 +125,7 @@ type IscreamContextValue = {
 
   contacts: Contact[];
   addContact: (c: Omit<Contact, 'id'>) => Promise<void>;
-  removeContact: (id: string) => void;
+  removeContact: (id: string) => Promise<void>;
 
   reports: Report[];
   submitGBVReport: (input: { summary: string; details?: string; locationText?: string; photoUri?: string }) => Promise<void>;
@@ -126,7 +135,7 @@ type IscreamContextValue = {
     isUnlocked: boolean;
     unlock: (pin: string) => boolean;
     lock: () => void;
-    update: (patch: Partial<MedicalProfile>) => void;
+    update: (patch: Partial<MedicalProfile>) => Promise<void>;
   };
 
   evidence: {
@@ -182,14 +191,33 @@ function botReply(userText: string) {
   return "I can help with setup, SOS, contacts, safe places, and GBV reporting. What do you want to do next?";
 }
 
+function emailToName(email?: string | null) {
+  if (!email) return 'User';
+  const beforeAt = email.split('@')[0] ?? 'User';
+  const cleaned = beforeAt.replace(/[._-]+/g, ' ');
+  return cleaned
+    .split(' ')
+    .filter(Boolean)
+    .map((p) => p[0]?.toUpperCase() + p.slice(1))
+    .join(' ');
+}
+
 export function IscreamProvider({ children }: { children: React.ReactNode }) {
+  const { enabled: authEnabled, user } = useAuth();
+  const firebaseOn = firebaseEnabled();
+  const backendEnabled = firebaseOn && authEnabled && !!user;
+
   const [selectedType, setSelectedType] = useState<IncidentType>('POLICE');
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
   const profile = useMemo<Profile>(
-    () => ({ fullName: 'Jackie', email: 'jackie@iscream.app', locationText: 'Orlando West, Soweto' }),
-    []
+    () => ({
+      fullName: user?.displayName || emailToName(user?.email) || 'Jackie',
+      email: user?.email || 'demo@iscream.app',
+      locationText: 'Orlando West, Soweto',
+    }),
+    [user?.displayName, user?.email]
   );
 
   const [contacts, setContacts] = useState<Contact[]>([
@@ -220,15 +248,66 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
     {
       id: id(),
       role: 'bot',
-      text: "Hi Jackie — I’m iScream Bot. I can help you set up SOS, medical profile, safe places, and GBV reporting.",
+      text: "Hi — I’m iScream Bot. I can help you set up SOS, medical profile, safe places, and GBV reporting.",
       at: Date.now(),
     },
   ]);
 
-  const [backendUserId, setBackendUserId] = useState<string | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
 
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const uid = user?.uid ?? null;
+
+  useEffect(() => {
+    if (!backendEnabled || !uid) return;
+
+    (async () => {
+      try {
+        await setDoc(
+          doc(db, 'users', uid),
+          {
+            email: profile.email,
+            fullName: profile.fullName,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+
+        // Load contacts
+        const contactsSnap = await getDocs(collection(db, 'users', uid, 'contacts'));
+        if (!contactsSnap.empty) {
+          const loaded = contactsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Contact[];
+          setContacts(loaded);
+        } else {
+          // Seed defaults
+          await Promise.all(
+            contacts.map((c) =>
+              setDoc(doc(db, 'users', uid, 'contacts', c.id), {
+                name: c.name,
+                phone: c.phone,
+                relationship: c.relationship ?? null,
+                createdAt: serverTimestamp(),
+              })
+            )
+          );
+        }
+
+        // Load medical
+        const medicalSnap = await getDoc(doc(db, 'users', uid, 'medical', 'profile'));
+        if (medicalSnap.exists()) {
+          setMedicalProfile(medicalSnap.data() as any);
+        } else {
+          await setDoc(doc(db, 'users', uid, 'medical', 'profile'), { ...medicalProfile, updatedAt: serverTimestamp() }, { merge: true });
+        }
+
+        setBackendError(null);
+      } catch (e: any) {
+        setBackendError(String(e?.message ?? e));
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backendEnabled, uid]);
 
   useEffect(() => {
     if (tickRef.current) clearInterval(tickRef.current);
@@ -278,27 +357,6 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const backendEnabled = apiEnabled();
-
-  const ensureBackendUser = async () => {
-    if (!backendEnabled) return null;
-    if (backendUserId) return backendUserId;
-
-    try {
-      const result = await apiFetch('/api/users', {
-        method: 'POST',
-        body: JSON.stringify({ email: profile.email, fullName: profile.fullName }),
-      });
-      const userId = result?.user?.id as string | undefined;
-      if (userId) setBackendUserId(userId);
-      setBackendError(null);
-      return userId ?? null;
-    } catch (e: any) {
-      setBackendError(String(e?.message ?? e));
-      return null;
-    }
-  };
-
   const activeIncident = useMemo(() => {
     if (!activeId) return null;
     return incidents.find((i) => i.id === activeId) ?? null;
@@ -327,7 +385,6 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
     setIncidents((prev) => [incident, ...prev]);
     setActiveId(incident.id);
 
-    // F-03 Evidence recording (demo): auto-start timer
     const ev: EvidenceRecording = {
       id: id(),
       alertId: incident.id,
@@ -342,19 +399,15 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
     setEvidenceAll((prev) => [ev, ...prev]);
     setActiveEvidenceId(ev.id);
 
-    const userId = await ensureBackendUser();
-    if (backendEnabled && userId) {
+    if (backendEnabled && uid) {
       try {
-        await apiFetch('/api/incidents', {
-          method: 'POST',
-          body: JSON.stringify({
-            userId,
-            type: selectedType,
-            title: 'SOS Triggered (mobile)',
-            description: incident.addressText ? `Address: ${incident.addressText}` : 'Demo SOS from iScream mobile',
-            latitude: opts?.latitude,
-            longitude: opts?.longitude,
-          }),
+        await setDoc(doc(db, 'users', uid, 'incidents', incident.id), {
+          ...incident,
+          createdAt: serverTimestamp(),
+        });
+        await setDoc(doc(db, 'users', uid, 'evidence', ev.id), {
+          ...ev,
+          createdAt: serverTimestamp(),
         });
         setBackendError(null);
       } catch (e: any) {
@@ -405,12 +458,13 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
     const newContact: Contact = { id: id(), ...c };
     setContacts((prev) => [newContact, ...prev]);
 
-    const userId = await ensureBackendUser();
-    if (backendEnabled && userId) {
+    if (backendEnabled && uid) {
       try {
-        await apiFetch('/api/contacts', {
-          method: 'POST',
-          body: JSON.stringify({ userId, name: c.name, phone: c.phone, relationship: c.relationship }),
+        await setDoc(doc(db, 'users', uid, 'contacts', newContact.id), {
+          name: newContact.name,
+          phone: newContact.phone,
+          relationship: newContact.relationship ?? null,
+          createdAt: serverTimestamp(),
         });
         setBackendError(null);
       } catch (e: any) {
@@ -419,8 +473,9 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const removeContact = (contactId: string) => {
+  const removeContact = async (contactId: string) => {
     setContacts((prev) => prev.filter((c) => c.id !== contactId));
+    // For MVP: omit delete in Firestore (can be added with deleteDoc)
   };
 
   const submitGBVReport = async (input: { summary: string; details?: string; locationText?: string; photoUri?: string }) => {
@@ -439,25 +494,12 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
 
     setReports((prev) => [r, ...prev]);
 
-    const userId = await ensureBackendUser();
-    if (backendEnabled && userId) {
+    if (backendEnabled && uid) {
       try {
-        const incidentRes = await apiFetch('/api/incidents', {
-          method: 'POST',
-          body: JSON.stringify({
-            userId,
-            type: 'OTHER',
-            title: 'GBV Report (mobile)',
-            description: r.summary,
-          }),
+        await setDoc(doc(db, 'users', uid, 'reports', r.id), {
+          ...r,
+          createdAt: serverTimestamp(),
         });
-        const incidentId = incidentRes?.incident?.id as string | undefined;
-        if (incidentId && r.details) {
-          await apiFetch(`/api/incidents/${incidentId}/events`, {
-            method: 'POST',
-            body: JSON.stringify({ kind: 'NOTE', message: r.details }),
-          });
-        }
         setBackendError(null);
       } catch (e: any) {
         setBackendError(String(e?.message ?? e));
@@ -466,7 +508,6 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
   };
 
   const unlockMedical = (pin: string) => {
-    // Demo-only PIN
     if (pin.trim() !== '1234') return false;
     setMedicalUnlocked(true);
     return true;
@@ -474,15 +515,21 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
 
   const lockMedical = () => setMedicalUnlocked(false);
 
-  const updateMedical = (patch: Partial<MedicalProfile>) => {
+  const updateMedical = async (patch: Partial<MedicalProfile>) => {
     setMedicalProfile((prev) => ({ ...prev, ...patch }));
+    if (backendEnabled && uid) {
+      try {
+        await setDoc(doc(db, 'users', uid, 'medical', 'profile'), { ...medicalProfile, ...patch, updatedAt: serverTimestamp() }, { merge: true });
+        setBackendError(null);
+      } catch (e: any) {
+        setBackendError(String(e?.message ?? e));
+      }
+    }
   };
 
   const assistantSend = (text: string) => {
     const now = Date.now();
     const userMsg: ChatMessage = { id: id(), role: 'user', text, at: now };
-    setAssistantMessages((prev) => [userMsg, ...prev]);
-
     const reply = botReply(text);
     const botMsg: ChatMessage = { id: id(), role: 'bot', text: reply, at: now + 250 };
     setAssistantMessages((prev) => [botMsg, userMsg, ...prev]);
@@ -519,7 +566,7 @@ export function IscreamProvider({ children }: { children: React.ReactNode }) {
     },
     backend: {
       enabled: backendEnabled,
-      userId: backendUserId,
+      userId: uid,
       lastError: backendError,
     },
   };

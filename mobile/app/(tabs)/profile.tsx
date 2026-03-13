@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { useRouter } from 'expo-router';
 
+import { useAuth } from '@/lib/auth';
 import { useIscream } from '@/lib/iscream';
 
 const BRAND = {
@@ -18,6 +19,7 @@ const DASHBOARD_URL = process.env.EXPO_PUBLIC_DASHBOARD_URL?.trim();
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const { enabled: authEnabled, user, signOut } = useAuth();
   const { profile, backend } = useIscream();
 
   return (
@@ -48,27 +50,25 @@ export default function ProfileScreen() {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>User</Text>
-        <Text style={styles.meta}>Name: {profile.fullName}</Text>
-        <Text style={styles.meta}>Email: {profile.email}</Text>
-        <Text style={styles.meta}>Location: {profile.locationText}</Text>
+        <Text style={styles.cardTitle}>Account</Text>
+        <Text style={styles.meta}>Firebase login: {authEnabled ? 'Enabled' : 'Not configured'}</Text>
+        <Text style={styles.meta}>Signed in as: {user?.email ?? 'Demo mode'}</Text>
+        {!!user && (
+          <Pressable onPress={signOut} style={[styles.btn, { backgroundColor: BRAND.red }]}>
+            <Text style={styles.btnText}>Sign out</Text>
+          </Pressable>
+        )}
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Backend Sync</Text>
-        <View style={styles.row}>
-          <View style={[styles.pill, { backgroundColor: backend.enabled ? '#E8F5E9' : '#FFF3E0' }]}>
-            <Text style={[styles.pillText, { color: backend.enabled ? BRAND.green : '#E67E22' }]}>
-              {backend.enabled ? 'ON' : 'OFF'}
-            </Text>
-          </View>
-          <Text style={styles.meta}>UserId: {backend.userId ?? 'not created yet'}</Text>
-        </View>
+        <Text style={styles.cardTitle}>Database</Text>
+        <Text style={styles.meta}>Firestore sync: {backend.enabled ? 'ON' : 'OFF'}</Text>
+        <Text style={styles.meta}>UserId: {backend.userId ?? '—'}</Text>
         {backend.lastError && (
           <Text style={[styles.meta, { color: BRAND.red, marginTop: 8 }]}>Last error: {backend.lastError}</Text>
         )}
         <Text style={[styles.meta, { marginTop: 10 }]}>
-          To enable: set `EXPO_PUBLIC_API_URL` to your laptop IP (same Wi‑Fi) and rebuild APK.
+          When signed in, contacts/incidents/reports/medical are saved to Firestore.
         </Text>
       </View>
 
@@ -110,10 +110,6 @@ const styles = StyleSheet.create({
   tile: { width: '48%', backgroundColor: '#F4F7FB', borderWidth: 1, borderColor: BRAND.border, borderRadius: 14, padding: 12 },
   tileTitle: { fontWeight: '900', color: BRAND.navy },
   tileSub: { marginTop: 6, color: '#6B7C92', fontSize: 12 },
-
-  row: { flexDirection: 'row', gap: 10, alignItems: 'center', marginTop: 10 },
-  pill: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999 },
-  pillText: { fontWeight: '900' },
 
   btn: { marginTop: 12, backgroundColor: BRAND.blue, paddingVertical: 12, borderRadius: 14, alignItems: 'center' },
   btnText: { color: 'white', fontWeight: '900' },
